@@ -34,6 +34,22 @@ e.g. -n 菅井友香 -n 佐々木久美 -n 秋元真夏.")
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("member_id")
+                .long("member-id")
+                .help("Save messages of a specific member ID directly.")
+                .long_help("Save messages of a specific member ID directly.
+This skips member discovery through groups and tags.")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("message_group_id")
+                .long("message-group-id")
+                .help("Save messages of a specific message group ID directly.")
+                .long_help("Save messages of a specific message group ID directly.
+Use this with --member-id when the member belongs to multiple groups.")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("from")
                 .long("from")
                 .short("F")
@@ -72,10 +88,24 @@ Use '--download-dir' to confirm the default directory.")
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("s_access_token")
+                .long("s_access_token")
+                .help("Set the sakurazaka access token directly.")
+                .long_help("Set the sakurazaka access token directly.")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("h_refresh_token")
                 .long("h_refresh_token")
                 .help("Set the hinatazaka refresh token.")
                 .long_help("Set the hinatazaka refresh token.")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("h_access_token")
+                .long("h_access_token")
+                .help("Set the hinatazaka access token directly.")
+                .long_help("Set the hinatazaka access token directly.")
                 .takes_value(true),
         )
         .arg(
@@ -86,10 +116,24 @@ Use '--download-dir' to confirm the default directory.")
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("n_access_token")
+                .long("n_access_token")
+                .help("Set the nogizaka access token directly.")
+                .long_help("Set the nogizaka access token directly.")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("a_refresh_token")
                 .long("a_refresh_token")
                 .help("Set the asukasaito refresh token.")
                 .long_help("Set the asukasaito refresh token.")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("a_access_token")
+                .long("a_access_token")
+                .help("Set the asukasaito access token directly.")
+                .long_help("Set the asukasaito access token directly.")
                 .takes_value(true),
         )
         .arg(
@@ -100,10 +144,24 @@ Use '--download-dir' to confirm the default directory.")
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("m_access_token")
+                .long("m_access_token")
+                .help("Set the maishiraishi access token directly.")
+                .long_help("Set the maishiraishi access token directly.")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("y_refresh_token")
                 .long("y_refresh_token")
                 .help("Set the yodel refresh token.")
                 .long_help("Set the yodel refresh token.")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("y_access_token")
+                .long("y_access_token")
+                .help("Set the yodel access token directly.")
+                .long_help("Set the yodel access token directly.")
                 .takes_value(true),
         )
         .arg(

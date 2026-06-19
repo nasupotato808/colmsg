@@ -88,14 +88,27 @@ impl Client {
     }
 
     fn insert_headers(&self, mut header: HeaderMap) -> Result<HeaderMap> {
+        let x_talk_app_id = env::var("COLMSG_X_TALK_APP_ID")
+            .ok()
+            .unwrap_or_else(|| self.x_talk_app_id.clone());
+
         header.insert(ACCEPT, "application/json".parse()?);
         header.insert(CONTENT_TYPE, "application/json".parse()?);
-        header.insert("X-Talk-App-ID", (&self.x_talk_app_id).parse()?);
+        header.insert("X-Talk-App-ID", x_talk_app_id.parse()?);
         header.insert(ACCEPT_LANGUAGE, "ja-JP".parse()?);
         header.insert(USER_AGENT, "Dalvik/2.1.0 (Linux; U; Android 6.0; Samsung Galaxy S7 for keyaki messages Build/MRA58K)".parse()?);
         header.insert(CONNECTION, "Keep-Alive".parse()?);
         header.insert(ACCEPT_ENCODING, "gzip".parse()?);
         header.insert(TE, "gzip, deflate; q=0.5".parse()?);
+        if let Ok(platform) = env::var("COLMSG_X_TALK_APP_PLATFORM") {
+            header.insert("X-Talk-App-Platform", platform.parse()?);
+        }
+        if let Ok(origin) = env::var("COLMSG_ORIGIN") {
+            header.insert("Origin", origin.parse()?);
+        }
+        if let Ok(referer) = env::var("COLMSG_REFERER") {
+            header.insert("Referer", referer.parse()?);
+        }
         Ok(header)
     }
 

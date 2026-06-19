@@ -1,7 +1,7 @@
 use crate::{errors::*, Config, message::saver::Saver, http::client::SHNClient};
 
 pub struct Controller<'a, C: SHNClient> {
-    config: &'a Config<'a, C>
+    config: &'a Config<C>
 }
 
 impl<'b, C: SHNClient> Controller<'b, C> {

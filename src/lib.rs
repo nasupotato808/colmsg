@@ -57,11 +57,13 @@ pub enum Kind {
     Link,
 }
 
-pub struct Config<'a, C: SHNClient> {
-    pub name: Vec<&'a str>,
+pub struct Config<C: SHNClient> {
+    pub name: Vec<String>,
     pub from: Option<NaiveDateTime>,
     pub kind: Vec<Kind>,
     pub dir: PathBuf,
     pub client: C,
     pub access_token: String,
+    pub member_id: Option<u32>,
+    pub message_group_id: Option<u32>,
 }

@@ -42,41 +42,45 @@ impl App {
         Ok(clap_app::build_app().get_matches_from(args))
     }
 
+    fn normalize_name(name: &str) -> String {
+        name.chars().filter(|c| !c.is_whitespace()).collect::<String>()
+    }
+
     pub fn sakurazaka_config(&self) -> Result<Config<SClient>> {
         let client = SClient::new();
-        self.config("s_refresh_token", client)
+        self.config("s_refresh_token", "s_access_token", client)
     }
 
     pub fn hinatazaka_config(&self) -> Result<Config<HClient>> {
         let client = HClient::new();
-        self.config("h_refresh_token", client)
+        self.config("h_refresh_token", "h_access_token", client)
     }
 
     pub fn nogizaka_config(&self) -> Result<Config<NClient>> {
         let client = NClient::new();
-        self.config("n_refresh_token", client)
+        self.config("n_refresh_token", "n_access_token", client)
     }
 
     pub fn asukasaito_config(&self) -> Result<Config<AClient>> {
         let client = AClient::new();
-        self.config("a_refresh_token", client)
+        self.config("a_refresh_token", "a_access_token", client)
     }
 
     pub fn maishiraishi_config(&self) -> Result<Config<MClient>> {
         let client = MClient::new();
-        self.config("m_refresh_token", client)
+        self.config("m_refresh_token", "m_access_token", client)
     }
 
     pub fn yodel_config(&self) -> Result<Config<YClient>> {
         let client = YClient::new();
-        self.config("y_refresh_token", client)
+        self.config("y_refresh_token", "y_access_token", client)
     }
 
-    fn config<S: AsRef<str>, C: SHNClient>(&self, refresh_token_str: S, client: C) -> Result<Config<C>> {
+    fn config<S: AsRef<str>, A: AsRef<str>, C: SHNClient>(&self, refresh_token_str: S, access_token_str: A, client: C) -> Result<Config<C>> {
         let name = match self.matches.values_of("name") {
             Some(names) => {
                 names
-                    .map(|name| { name.trim() })
+                    .map(Self::normalize_name)
                     .collect::<Vec<_>>()
             }
             None => vec![]
@@ -118,12 +122,37 @@ impl App {
             }
         }
 
-        let refresh_token = self.matches
-            .value_of(refresh_token_str)
-            .map(String::from)
-            .unwrap_or_else(|| String::from("invalid_refresh_token"));
+        let member_id = self.matches
+            .value_of("member_id")
+            .map(|id| id.parse::<u32>())
+            .transpose()
+            .map_err(|e| format!("Invalid member id: {}", e))?;
 
-        let access_token = get_access_token_from_file(&refresh_token, client.clone())?;
-        Ok(Config { name, from, kind, dir, client: client.clone(), access_token })
+        let message_group_id = self.matches
+            .value_of("message_group_id")
+            .map(|id| id.parse::<u32>())
+            .transpose()
+            .map_err(|e| format!("Invalid message group id: {}", e))?;
+
+        let access_token = match self.matches.value_of(access_token_str.as_ref()) {
+            Some(access_token) => access_token.to_string(),
+            None => {
+                let refresh_token = self.matches
+                    .value_of(refresh_token_str.as_ref())
+                    .map(String::from)
+                    .unwrap_or_else(|| String::from("invalid_refresh_token"));
+                get_access_token_from_file(&refresh_token, client.clone())?
+            }
+        };
+        Ok(Config {
+            name,
+            from,
+            kind,
+            dir,
+            client: client.clone(),
+            access_token,
+            member_id,
+            message_group_id,
+        })
     }
 }

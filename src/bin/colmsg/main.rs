@@ -22,8 +22,13 @@ fn run_controller<C: SHNClient>(config: &Config<C>) -> Result<bool> {
     controller.run()
 }
 
+fn has_auth(app: &App, refresh_token: &str, access_token: &str) -> bool {
+    app.matches.value_of(refresh_token).is_some()
+        || app.matches.value_of(access_token).is_some()
+}
+
 fn run_sakurazaka(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("s_refresh_token") { return Ok(true) };
+    if !has_auth(app, "s_refresh_token", "s_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "sakurazaka"),
         None => true
@@ -34,7 +39,7 @@ fn run_sakurazaka(app: &App) -> Result<bool> {
 }
 
 fn run_hinatazaka(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("h_refresh_token") { return Ok(true) };
+    if !has_auth(app, "h_refresh_token", "h_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "hinatazaka"),
         None => true
@@ -45,7 +50,7 @@ fn run_hinatazaka(app: &App) -> Result<bool> {
 }
 
 fn run_nogizaka(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("n_refresh_token") { return Ok(true) };
+    if !has_auth(app, "n_refresh_token", "n_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "nogizaka"),
         None => true
@@ -56,7 +61,7 @@ fn run_nogizaka(app: &App) -> Result<bool> {
 }
 
 fn run_asukasaito(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("a_refresh_token") { return Ok(true) };
+    if !has_auth(app, "a_refresh_token", "a_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "asukasaito"),
         None => true
@@ -67,7 +72,7 @@ fn run_asukasaito(app: &App) -> Result<bool> {
 }
 
 fn run_maishiraishi(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("m_refresh_token") { return Ok(true) };
+    if !has_auth(app, "m_refresh_token", "m_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "maishiraishi"),
         None => true
@@ -78,7 +83,7 @@ fn run_maishiraishi(app: &App) -> Result<bool> {
 }
 
 fn run_yodel(app: &App) -> Result<bool> {
-    if let None = app.matches.value_of("y_refresh_token") { return Ok(true) };
+    if !has_auth(app, "y_refresh_token", "y_access_token") { return Ok(true) };
     let is_run_by_group = match app.matches.values_of("group") {
         Some(k) => k.clone().any(|v| v == "yodel"),
         None => true
@@ -102,6 +107,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("s_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_sakurazaka(&app);
@@ -116,6 +122,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("h_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_hinatazaka(&app);
@@ -130,6 +137,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("n_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_nogizaka(&app);
@@ -144,6 +152,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("a_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_asukasaito(&app);
@@ -158,6 +167,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("m_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_maishiraishi(&app);
@@ -172,6 +182,7 @@ fn run() -> Result<bool> {
     loop {
         match &result {
             Err(Error(ReqwestError(re), _)) => {
+                if app.matches.value_of("y_access_token").is_some() { break; };
                 if Some(StatusCode::UNAUTHORIZED) != re.status() { break; };
                 delete_access_token_file()?;
                 result = run_yodel(&app);

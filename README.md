@@ -28,6 +28,31 @@ colmsg --s_refresh_token <s_refresh_token> --h_refresh_token <h_refresh_token> -
 
 Windowsの場合は実行ファイル名を `colmsg.exe` に読み替えてください。
 
+## Update: Sakura Web access token
+
+If you cannot get a `refresh_token`, this version can use the Sakura
+Message API `access_token` directly. Use the token from the working
+`Authorization: Bearer ...` request header. Do not include the `Bearer `
+prefix, and do not use the Google sign-in token.
+
+Set these values in the same PowerShell session before running `colmsg.exe`:
+
+```powershell
+$env:S_BASE_URL="https://api.message.sakurazaka46.com"
+$env:COLMSG_X_TALK_APP_ID="jp.co.sonymusic.communication.sakurazaka 2.5"
+$env:COLMSG_X_TALK_APP_PLATFORM="web"
+$env:COLMSG_ORIGIN="https://message.sakurazaka46.com"
+$env:COLMSG_REFERER="https://message.sakurazaka46.com/"
+
+.\target\release\colmsg.exe `
+  --s_access_token "MESSAGE_API_ACCESS_TOKEN" `
+  -n "藤吉夏鈴"
+```
+
+The access token usually expires after a short time, such as 3600 seconds.
+When it expires, copy a fresh Message API token from the browser or Reqable
+and run the command again.
+
 ## 特徴
 
 * ✅ 端末のroot化の必要がありません

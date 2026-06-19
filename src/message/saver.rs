@@ -18,7 +18,7 @@ lazy_static! {
 }
 
 pub struct Saver<'a, C: SHNClient> {
-    config: &'a Config<'a, C>,
+    config: &'a Config<C>,
 }
 
 impl<'b, C: SHNClient> Saver<'b, C> {
@@ -27,6 +27,16 @@ impl<'b, C: SHNClient> Saver<'b, C> {
     }
 
     pub fn save(&self) -> Result<()> {
+        if let Some(member_id) = self.config.member_id {
+            self.save_direct_member(member_id)?;
+            return Ok(());
+        }
+
+        if let Some(message_group_id) = self.config.message_group_id {
+            self.save_direct_group(message_group_id)?;
+            return Ok(());
+        }
+
         let groups = http::groups::request(self.config.client.clone(), &self.config.access_token)?;
         let tags = http::tags::request(self.config.client.clone(), &self.config.access_token)?;
 
@@ -39,6 +49,41 @@ impl<'b, C: SHNClient> Saver<'b, C> {
         Ok(())
     }
 
+    fn save_direct_member(&self, member_id: u32) -> Result<()> {
+        let member = http::members::request(
+            self.config.client.clone(),
+            &self.config.access_token,
+            &member_id
+        )?;
+        let message_group_id = match self.config.message_group_id {
+            Some(id) => id,
+            None => *member.groups
+                .first()
+                .ok_or_else(|| format!("member {} has no message groups", member_id))?
+        };
+
+        self.save_messages(MemberIdentifier::new(
+            message_group_id,
+            self.trim(&member.name),
+            "".to_string(),
+            true,
+        ))
+    }
+
+    fn save_direct_group(&self, message_group_id: u32) -> Result<()> {
+        let name = self.config.name
+            .first()
+            .map(|name| self.trim(name))
+            .unwrap_or_else(|| format!("group_{}", message_group_id));
+
+        self.save_messages(MemberIdentifier::new(
+            message_group_id,
+            name,
+            "".to_string(),
+            true,
+        ))
+    }
+
     fn subscribed_list(&self, group: &Vec<Groups>, tags: &Vec<Tags>) -> Vec<MemberIdentifier> {
         self.create_member_identifier_list(group, tags)
             .iter()
@@ -46,7 +91,7 @@ impl<'b, C: SHNClient> Saver<'b, C> {
             .filter(|m| { m.subscription })
             .filter(|m| {
                 if self.config.name.is_empty() { return true; } // メンバー指定が無い場合は全メンバーを対象にする
-                self.config.name.contains(&&*self.trim(&m.name))
+                self.config.name.contains(&self.trim(&m.name))
             })
             .collect::<Vec<_>>()
     }

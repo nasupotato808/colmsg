@@ -70,10 +70,10 @@ pub fn request<C: SHNClient>(client: C, access_token: &String, id: &u32, fromdat
     let path = format!("{}/{}{}", PATH, id, PATH2);
     let access_token = String::from(access_token);
     let parameters = vec![
-        ("created_from", "2000-01-01T00:00:00Z"),
-        ("updated_from", fromdate),
+        ("updated_from", fromdate.as_str()),
         ("count", count),
-        ("order", ORDER)
+        ("order", ORDER),
+        ("clear_unread", "true")
     ];
 
     client.get_request::<Timeline>(path.as_str(), &access_token, Some(parameters), true)
