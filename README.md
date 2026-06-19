@@ -35,6 +35,30 @@ Message API `access_token` directly. Use the token from the working
 `Authorization: Bearer ...` request header. Do not include the `Bearer `
 prefix, and do not use the Google sign-in token.
 
+### Get the token from Chrome
+
+1. Open `https://message.sakurazaka46.com/` in Chrome and sign in.
+2. Open DevTools with `F12` or `Ctrl+Shift+I`.
+3. Open the `Network` tab, then reload the page if no requests are shown.
+4. Select a successful API request, such as `profile`.
+5. In `Headers`, find `Authorization: Bearer ...`.
+6. Copy only the token after `Bearer `.
+
+![Copy the bearer token from Chrome DevTools](example1.png)
+
+Keep this token private. Anyone with the token can use your active session
+until it expires.
+
+### Use the token in the Windows UI
+
+Open `colmsg-ui.cmd`, paste the copied token into `Access token`, then click
+`Load` to load your subscribed members. After the member list is loaded, choose
+the member and click `Run`.
+
+![Paste the token into colmsg-ui.cmd](example2.png)
+
+### Use the token from PowerShell
+
 Set these values in the same PowerShell session before running `colmsg.exe`:
 
 ```powershell
