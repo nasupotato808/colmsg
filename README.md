@@ -28,9 +28,9 @@ colmsg --s_refresh_token <s_refresh_token> --h_refresh_token <h_refresh_token> -
 
 Windowsの場合は実行ファイル名を `colmsg.exe` に読み替えてください。
 
-## Update: Sakura Web access token
+## Update: Sakurazaka Web access token (tested)
 
-If you cannot get a `refresh_token`, this version can use the Sakura
+If you cannot get a `refresh_token`, this version can use the Sakurazaka
 Message API `access_token` directly. Use the token from the working
 `Authorization: Bearer ...` request header. Do not include the `Bearer `
 prefix, and do not use the Google sign-in token.
