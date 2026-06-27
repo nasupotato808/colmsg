@@ -1,28 +1,22 @@
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
+use chrono::NaiveDateTime;
 use clap::ArgMatches;
 use wild;
-use chrono::NaiveDateTime;
 
 use colmsg::{
     dirs::PROJECT_DIRS,
     errors::*,
-    Config,
-    Kind,
-    http::client::{SClient, SHNClient, HClient, NClient, AClient, MClient, YClient}
+    http::client::{AClient, HClient, MClient, NClient, SClient, SHNClient, YClient},
+    Config, Kind,
 };
 
-use crate::{
-    clap_app,
-    config::get_args_from_config_file,
-    config::get_access_token_from_file,
-};
+use crate::{clap_app, config::get_access_token_from_file, config::get_args_from_config_file};
 
 pub struct App {
-    pub matches: ArgMatches<'static>
+    pub matches: ArgMatches<'static>,
 }
-
 
 impl App {
     pub fn new() -> Result<Self> {
@@ -33,8 +27,7 @@ impl App {
 
     fn matches() -> Result<ArgMatches<'static>> {
         let mut cli_args = wild::args_os();
-        let mut args = get_args_from_config_file()
-            .expect("Could not parse configuration file");
+        let mut args = get_args_from_config_file().expect("Could not parse configuration file");
 
         args.insert(0, cli_args.next().unwrap());
         cli_args.for_each(|string| args.push(string));
@@ -43,7 +36,52 @@ impl App {
     }
 
     fn normalize_name(name: &str) -> String {
-        name.chars().filter(|c| !c.is_whitespace()).collect::<String>()
+        name.chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+    }
+
+    fn parse_datetime_arg(value: Option<&str>) -> Result<Option<NaiveDateTime>> {
+        match value {
+            Some(value) => {
+                let formats = [
+                    "%Y-%m-%dT%H:%M:%SZ",
+                    "%Y/%m/%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S",
+                ];
+
+                for format in &formats {
+                    if let Ok(datetime) = NaiveDateTime::parse_from_str(value, format) {
+                        return Ok(Some(datetime));
+                    }
+                }
+
+                Err(format!(
+                    "Invalid date format: {}. Use YYYY-MM-DDTHH:MM:SSZ.",
+                    value
+                )
+                .into())
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn normalize_access_token(access_token: &str) -> String {
+        let mut token = access_token
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim();
+
+        if token.to_ascii_lowercase().starts_with("authorization:") {
+            token = token.splitn(2, ':').nth(1).unwrap_or("").trim();
+        }
+
+        if token.to_ascii_lowercase().starts_with("bearer ") {
+            token = token[7..].trim();
+        }
+
+        token.to_string()
     }
 
     pub fn sakurazaka_config(&self) -> Result<Config<SClient>> {
@@ -76,24 +114,24 @@ impl App {
         self.config("y_refresh_token", "y_access_token", client)
     }
 
-    fn config<S: AsRef<str>, A: AsRef<str>, C: SHNClient>(&self, refresh_token_str: S, access_token_str: A, client: C) -> Result<Config<C>> {
+    fn config<S: AsRef<str>, A: AsRef<str>, C: SHNClient>(
+        &self,
+        refresh_token_str: S,
+        access_token_str: A,
+        client: C,
+    ) -> Result<Config<C>> {
         let name = match self.matches.values_of("name") {
-            Some(names) => {
-                names
-                    .map(Self::normalize_name)
-                    .collect::<Vec<_>>()
-            }
-            None => vec![]
+            Some(names) => names.map(Self::normalize_name).collect::<Vec<_>>(),
+            None => vec![],
         };
 
-        let from = self.matches
-            .value_of("from")
-            .map(|from| NaiveDateTime::parse_from_str(from, "%Y/%m/%d %H:%M:%S"));
-        let from = match from {
-            Some(Ok(t)) => Some(t),
-            Some(Err(e)) => return Err(e.into()),
-            None => None
-        };
+        let from = Self::parse_datetime_arg(self.matches.value_of("from"))?;
+        let to = Self::parse_datetime_arg(self.matches.value_of("to"))?;
+        if let (Some(from), Some(to)) = (from.as_ref(), to.as_ref()) {
+            if from > to {
+                return Err("From date must be earlier than To date.".into());
+            }
+        }
 
         let kind = match self.matches.values_of("kind") {
             Some(k) => {
@@ -106,12 +144,20 @@ impl App {
                         "link" => Kind::Link,
                         _ => Kind::Link, // _ はあり得ないはずだが怒られるのでとりあえずLinkにする
                     }
-                }).collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
             }
-            None => vec![Kind::Text, Kind::Picture, Kind::Video, Kind::Voice, Kind::Link]
+            None => vec![
+                Kind::Text,
+                Kind::Picture,
+                Kind::Video,
+                Kind::Voice,
+                Kind::Link,
+            ],
         };
 
-        let dir = self.matches
+        let dir = self
+            .matches
             .value_of("dir")
             .map(PathBuf::from)
             .unwrap_or_else(|| PROJECT_DIRS.download_dir().to_path_buf());
@@ -122,22 +168,25 @@ impl App {
             }
         }
 
-        let member_id = self.matches
+        let member_id = self
+            .matches
             .value_of("member_id")
             .map(|id| id.parse::<u32>())
             .transpose()
             .map_err(|e| format!("Invalid member id: {}", e))?;
 
-        let message_group_id = self.matches
+        let message_group_id = self
+            .matches
             .value_of("message_group_id")
             .map(|id| id.parse::<u32>())
             .transpose()
             .map_err(|e| format!("Invalid message group id: {}", e))?;
 
         let access_token = match self.matches.value_of(access_token_str.as_ref()) {
-            Some(access_token) => access_token.to_string(),
+            Some(access_token) => Self::normalize_access_token(access_token),
             None => {
-                let refresh_token = self.matches
+                let refresh_token = self
+                    .matches
                     .value_of(refresh_token_str.as_ref())
                     .map(String::from)
                     .unwrap_or_else(|| String::from("invalid_refresh_token"));
@@ -147,6 +196,7 @@ impl App {
         Ok(Config {
             name,
             from,
+            to,
             kind,
             dir,
             client: client.clone(),

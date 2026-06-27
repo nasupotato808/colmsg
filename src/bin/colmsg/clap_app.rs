@@ -1,4 +1,4 @@
-use clap::{App as ClapApp, Arg, AppSettings};
+use clap::{App as ClapApp, AppSettings, Arg};
 
 pub fn build_app() -> ClapApp<'static, 'static> {
     ClapApp::new(crate_name!())
@@ -55,8 +55,18 @@ Use this with --member-id when the member belongs to multiple groups.")
                 .short("F")
                 .help("Save messages after the specific date.")
                 .long_help("Save messages after the specific date.
-Date format is %Y/%m/%d %H:%M:%S
-e.g. -F '2020/01/01 00:00:00'")
+Date format is %Y-%m-%dT%H:%M:%SZ
+e.g. -F '2020-01-01T00:00:00Z'")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("to")
+                .long("to")
+                .short("T")
+                .help("Save messages before the specific date.")
+                .long_help("Save messages before the specific date.
+Date format is %Y-%m-%dT%H:%M:%SZ
+e.g. -T '2020-01-31T23:59:59Z'")
                 .takes_value(true),
         )
         .arg(

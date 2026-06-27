@@ -6,6 +6,8 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $script:process = $null
+$script:stopRequested = $false
+$script:runTimer = $null
 if (-not [string]::IsNullOrWhiteSpace($env:COLMSG_UI_ROOT)) {
     $script:root = $env:COLMSG_UI_ROOT
 } else {
@@ -60,6 +62,31 @@ function Quote-Argument {
     return '"' + $escaped + '"'
 }
 
+function Normalize-AccessToken {
+    param([string]$Value)
+
+    if ($null -eq $Value) { return "" }
+
+    $token = $Value.Trim().Trim('"').Trim("'")
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return ""
+    }
+
+    if ($token -match '^\s*Authorization\s*:' -or $token -match '^\s*Bearer\s+') {
+        throw "Paste only the token value that starts with ey..., not Bearer or Authorization."
+    }
+
+    if ($token -notmatch '^ey') {
+        throw "Paste only the token value that starts with ey..."
+    }
+
+    if ($token -match '\s') {
+        throw "The access token should not contain spaces or line breaks."
+    }
+
+    return $token
+}
+
 function Add-Label {
     param(
         [System.Windows.Forms.Control]$Parent,
@@ -95,6 +122,25 @@ function Add-TextBox {
     return $textBox
 }
 
+function Add-DatePicker {
+    param(
+        [System.Windows.Forms.Control]$Parent,
+        [int]$X,
+        [int]$Y,
+        [int]$Width
+    )
+
+    $picker = New-Object System.Windows.Forms.DateTimePicker
+    $picker.Location = New-Object System.Drawing.Point($X, $Y)
+    $picker.Size = New-Object System.Drawing.Size($Width, 24)
+    $picker.Format = [System.Windows.Forms.DateTimePickerFormat]::Custom
+    $picker.CustomFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+    $picker.ShowCheckBox = $true
+    $picker.Checked = $false
+    $Parent.Controls.Add($picker)
+    return $picker
+}
+
 function Add-Button {
     param(
         [System.Windows.Forms.Control]$Parent,
@@ -110,6 +156,58 @@ function Add-Button {
     $button.Size = New-Object System.Drawing.Size($Width, 28)
     $Parent.Controls.Add($button)
     return $button
+}
+
+function Format-DatePickerArgument {
+    param([System.Windows.Forms.DateTimePicker]$Picker)
+
+    if (-not $Picker.Checked) { return "" }
+    return $Picker.Value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Show-DownloadResult {
+    param(
+        [string]$Message,
+        [System.Windows.Forms.MessageBoxIcon]$Icon
+    )
+
+    [System.Windows.Forms.MessageBox]::Show($form, $Message, "colmsg", "OK", $Icon) | Out-Null
+}
+
+function Complete-RunFromProcess {
+    if ($script:runTimer -ne $null) {
+        $script:runTimer.Stop()
+        $script:runTimer.Dispose()
+        $script:runTimer = $null
+    }
+
+    $exitCode = 1
+    if ($script:process -ne $null) {
+        try {
+            $script:process.WaitForExit()
+            $exitCode = $script:process.ExitCode
+        } catch {
+            Add-LogLine $_.Exception.Message
+        }
+    }
+
+    if ($script:stopRequested) {
+        Add-LogLine "Stopped."
+        Set-Status "Stopped" $false
+        Show-DownloadResult "Download stopped. The UI will stay open until you close it." ([System.Windows.Forms.MessageBoxIcon]::Information)
+    } elseif ($exitCode -eq 0) {
+        Add-LogLine "Complete."
+        Set-Status "Complete" $false
+        Show-DownloadResult "Download complete. The UI will stay open until you close it." ([System.Windows.Forms.MessageBoxIcon]::Information)
+    } else {
+        Add-LogLine ("Failed. Exit code: " + $exitCode)
+        Set-Status ("Failed. Exit code: " + $exitCode) $false
+        Show-DownloadResult ("Download failed. Exit code: " + $exitCode + ". Check the log in this window.") ([System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+
+    $script:process = $null
+    $script:stopRequested = $false
+    Set-RunningState $false
 }
 
 function Add-LogLine {
@@ -213,7 +311,7 @@ function Get-SelectedMemberGroupId {
 }
 
 function Load-Members {
-    $token = $tokenBox.Text.Trim()
+    $token = Normalize-AccessToken $tokenBox.Text
     if ([string]::IsNullOrWhiteSpace($token)) {
         throw "Paste a Message API access token first."
     }
@@ -258,7 +356,7 @@ function Load-Members {
 function Build-Arguments {
     $arguments = New-Object System.Collections.Generic.List[string]
 
-    $token = $tokenBox.Text.Trim()
+    $token = Normalize-AccessToken $tokenBox.Text
     if ([string]::IsNullOrWhiteSpace($token)) {
         throw "Paste a Message API access token first."
     }
@@ -289,9 +387,16 @@ function Build-Arguments {
         $arguments.Add($downloadBox.Text.Trim())
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($fromBox.Text)) {
+    $fromDate = Format-DatePickerArgument $fromBox
+    if (-not [string]::IsNullOrWhiteSpace($fromDate)) {
         $arguments.Add("-F")
-        $arguments.Add($fromBox.Text.Trim())
+        $arguments.Add($fromDate)
+    }
+
+    $toDate = Format-DatePickerArgument $toBox
+    if (-not [string]::IsNullOrWhiteSpace($toDate)) {
+        $arguments.Add("-T")
+        $arguments.Add($toDate)
     }
 
     $kindChecks = @(
@@ -379,8 +484,8 @@ function Resolve-DownloadFolder {
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "colmsg"
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(820, 760)
-$form.MinimumSize = New-Object System.Drawing.Size(760, 680)
+$form.Size = New-Object System.Drawing.Size(820, 800)
+$form.MinimumSize = New-Object System.Drawing.Size(760, 720)
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
 $form.Font = $font
@@ -427,7 +532,7 @@ $refererBox = Add-TextBox $authGroup 130 160 525 "https://message.sakurazaka46.c
 $targetGroup = New-Object System.Windows.Forms.GroupBox
 $targetGroup.Text = "Download Target"
 $targetGroup.Location = New-Object System.Drawing.Point(12, 290)
-$targetGroup.Size = New-Object System.Drawing.Size(780, 148)
+$targetGroup.Size = New-Object System.Drawing.Size(780, 180)
 $form.Controls.Add($targetGroup)
 
 Add-Label $targetGroup "Member name" 12 30 110 | Out-Null
@@ -454,63 +559,63 @@ $downloadBox = Add-TextBox $targetGroup 130 66 525
 $browseFolderButton = Add-Button $targetGroup "Browse" 665 64 90
 
 Add-Label $targetGroup "From" 12 102 110 | Out-Null
-$fromBox = Add-TextBox $targetGroup 130 102 180
-try {
-    $fromBox.PlaceholderText = "YYYY/MM/DD HH:MM:SS"
-} catch {
-    $fromBox.Text = ""
-}
+$fromBox = Add-DatePicker $targetGroup 130 102 190
+$fromBox.Value = [DateTime]::Today
+Add-Label $targetGroup "To" 340 102 35 | Out-Null
+$toBox = Add-DatePicker $targetGroup 375 102 190
+$toBox.Value = [DateTime]::Now
 
+Add-Label $targetGroup "Types" 12 136 110 | Out-Null
 $kindText = New-Object System.Windows.Forms.CheckBox
 $kindText.Text = "Text"
 $kindText.Checked = $true
-$kindText.Location = New-Object System.Drawing.Point(330, 104)
+$kindText.Location = New-Object System.Drawing.Point(130, 138)
 $kindText.Size = New-Object System.Drawing.Size(60, 22)
 $targetGroup.Controls.Add($kindText)
 
 $kindPicture = New-Object System.Windows.Forms.CheckBox
 $kindPicture.Text = "Picture"
 $kindPicture.Checked = $true
-$kindPicture.Location = New-Object System.Drawing.Point(395, 104)
+$kindPicture.Location = New-Object System.Drawing.Point(195, 138)
 $kindPicture.Size = New-Object System.Drawing.Size(70, 22)
 $targetGroup.Controls.Add($kindPicture)
 
 $kindVideo = New-Object System.Windows.Forms.CheckBox
 $kindVideo.Text = "Video"
 $kindVideo.Checked = $true
-$kindVideo.Location = New-Object System.Drawing.Point(470, 104)
+$kindVideo.Location = New-Object System.Drawing.Point(270, 138)
 $kindVideo.Size = New-Object System.Drawing.Size(65, 22)
 $targetGroup.Controls.Add($kindVideo)
 
 $kindVoice = New-Object System.Windows.Forms.CheckBox
 $kindVoice.Text = "Voice"
 $kindVoice.Checked = $true
-$kindVoice.Location = New-Object System.Drawing.Point(540, 104)
+$kindVoice.Location = New-Object System.Drawing.Point(340, 138)
 $kindVoice.Size = New-Object System.Drawing.Size(65, 22)
 $targetGroup.Controls.Add($kindVoice)
 
 $kindLink = New-Object System.Windows.Forms.CheckBox
 $kindLink.Text = "Link"
 $kindLink.Checked = $true
-$kindLink.Location = New-Object System.Drawing.Point(610, 104)
+$kindLink.Location = New-Object System.Drawing.Point(410, 138)
 $kindLink.Size = New-Object System.Drawing.Size(60, 22)
 $targetGroup.Controls.Add($kindLink)
 
-$runButton = Add-Button $form "Run" 22 450 100
-$stopButton = Add-Button $form "Stop" 132 450 100
+$runButton = Add-Button $form "Run" 22 482 100
+$stopButton = Add-Button $form "Stop" 132 482 100
 $stopButton.Enabled = $false
-$copyButton = Add-Button $form "Copy command" 242 450 120
-$openFolderButton = Add-Button $form "Open folder" 372 450 110
+$copyButton = Add-Button $form "Copy command" 242 482 120
+$openFolderButton = Add-Button $form "Open folder" 372 482 110
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = "Ready"
-$statusLabel.Location = New-Object System.Drawing.Point(500, 453)
+$statusLabel.Location = New-Object System.Drawing.Point(500, 485)
 $statusLabel.Size = New-Object System.Drawing.Size(280, 22)
 $statusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $form.Controls.Add($statusLabel)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(12, 486)
+$progressBar.Location = New-Object System.Drawing.Point(12, 518)
 $progressBar.Size = New-Object System.Drawing.Size(780, 12)
 $progressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor
     [System.Windows.Forms.AnchorStyles]::Right -bor
@@ -519,7 +624,7 @@ $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
 $form.Controls.Add($progressBar)
 
 $logBox = New-Object System.Windows.Forms.TextBox
-$logBox.Location = New-Object System.Drawing.Point(12, 506)
+$logBox.Location = New-Object System.Drawing.Point(12, 538)
 $logBox.Size = New-Object System.Drawing.Size(780, 204)
 $logBox.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor
     [System.Windows.Forms.AnchorStyles]::Right -bor
@@ -610,6 +715,7 @@ $runButton.Add_Click({
         Add-LogLine "Starting colmsg..."
         Add-LogLine ((Quote-Argument $exe) + " " + $displayArgumentText)
         Add-LogLine "Waiting for download output..."
+        Add-LogLine "This window will stay open after the download finishes."
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $exe
@@ -630,7 +736,8 @@ $runButton.Add_Click({
 
         $script:process = New-Object System.Diagnostics.Process
         $script:process.StartInfo = $psi
-        $script:process.EnableRaisingEvents = $true
+        $script:process.EnableRaisingEvents = $false
+        $script:stopRequested = $false
 
         $script:process.add_OutputDataReceived({
             param($sender, $eventArgs)
@@ -642,33 +749,31 @@ $runButton.Add_Click({
             if ($eventArgs.Data) { Add-LogLine $eventArgs.Data }
         })
 
-        $script:process.add_Exited({
-            param($sender, $eventArgs)
-            try {
-                $exitCode = $sender.ExitCode
-                $null = $form.BeginInvoke([Action]{
-                    try {
-                        if ($exitCode -eq 0) {
-                            Add-LogLine "Complete."
-                            Set-Status "Complete" $false
-                        } else {
-                            Add-LogLine ("Failed. Exit code: " + $exitCode)
-                            Set-Status ("Failed. Exit code: " + $exitCode) $false
-                        }
-                        Set-RunningState $false
-                    } catch {
-                        Show-UiError $_.Exception.ToString()
-                    }
-                })
-            } catch {
-                Show-UiError $_.Exception.ToString()
-            }
-        })
-
         Set-RunningState $true
         [void]$script:process.Start()
         $script:process.BeginOutputReadLine()
         $script:process.BeginErrorReadLine()
+
+        if ($script:runTimer -ne $null) {
+            $script:runTimer.Stop()
+            $script:runTimer.Dispose()
+        }
+        $script:runTimer = New-Object System.Windows.Forms.Timer
+        $script:runTimer.Interval = 500
+        $script:runTimer.Add_Tick({
+            try {
+                if ($script:process -eq $null) {
+                    return
+                }
+                if ($script:process.HasExited) {
+                    Complete-RunFromProcess
+                }
+            } catch {
+                Show-UiError $_.Exception.ToString()
+                Complete-RunFromProcess
+            }
+        })
+        $script:runTimer.Start()
     } catch {
         Set-RunningState $false
         Set-Status "Ready" $false
@@ -678,10 +783,10 @@ $runButton.Add_Click({
 
 $stopButton.Add_Click({
     if ($script:process -ne $null -and -not $script:process.HasExited) {
+        $script:stopRequested = $true
         $script:process.Kill()
-        Add-LogLine "Stopped."
-        Set-Status "Stopped" $false
-        Set-RunningState $false
+        Add-LogLine "Stopping..."
+        Set-Status "Stopping..." $true
     }
 })
 
@@ -703,6 +808,12 @@ $form.Add_FormClosing({
         }
 
         $script:process.Kill()
+        $script:stopRequested = $true
+        if ($script:runTimer -ne $null) {
+            $script:runTimer.Stop()
+            $script:runTimer.Dispose()
+            $script:runTimer = $null
+        }
     }
 })
 

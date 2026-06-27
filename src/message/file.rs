@@ -128,13 +128,14 @@ fn save_text(member_dir_buf: &PathBuf, filename: &String, talk: &Option<String>)
 }
 
 fn save_media(member_dir_buf: &PathBuf, filename: &String, file_url: &Option<String>, extension: &str) -> Result<()> {
-    if let Some(f) = file_url {
-        let mut response = reqwest::blocking::get(f)?;
-        let mut file = create_file(member_dir_buf, &filename, &extension)?;
-        copy(&mut response, &mut file)?;
+    let f = file_url
+        .as_ref()
+        .ok_or_else(|| format!("missing media URL for {}", filename))?;
+    let mut response = reqwest::blocking::get(f)?.error_for_status()?;
+    let mut file = create_file(member_dir_buf, &filename, &extension)?;
+    copy(&mut response, &mut file)?;
 
-        file.flush()?;
-    }
+    file.flush()?;
     Ok(())
 }
 
