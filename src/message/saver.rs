@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::NaiveDateTime;
+use chrono::{Local, NaiveDateTime};
 use rayon::prelude::*;
 use regex::Regex;
 use walkdir::{DirEntry, WalkDir};
@@ -272,14 +272,35 @@ impl<'b, C: SHNClient> Saver<'b, C> {
     }
 
     fn create_member_dir_buf(&self, member_identifier: &MemberIdentifier) -> Result<PathBuf> {
-        let mut member_dir_buf = self.config.dir.clone();
-        member_dir_buf.push(&member_identifier.gen);
+        let mut parent_dir_buf = self.config.dir.clone();
+        parent_dir_buf.push(&member_identifier.gen);
+
+        let mut member_dir_buf = parent_dir_buf.clone();
         member_dir_buf.push(&member_identifier.name);
-        if !member_dir_buf.is_dir() {
-            println!("create directory: {}", member_dir_buf.display());
-            fs::create_dir_all(&member_dir_buf)?
+
+        if member_dir_buf.exists() {
+            member_dir_buf = self.unique_member_dir_buf(&parent_dir_buf, &member_identifier.name);
         }
+
+        println!("create directory: {}", member_dir_buf.display());
+        fs::create_dir_all(&member_dir_buf)?;
         Ok(member_dir_buf)
+    }
+
+    fn unique_member_dir_buf(&self, parent_dir_buf: &PathBuf, member_name: &String) -> PathBuf {
+        let timestamp = Local::now().format("%Y%m%d%H%M%S").to_string();
+        let base_name = format!("{}_{}", member_name, timestamp);
+        let mut candidate = parent_dir_buf.clone();
+        candidate.push(&base_name);
+
+        let mut index = 2;
+        while candidate.exists() {
+            candidate = parent_dir_buf.clone();
+            candidate.push(format!("{}_{}", base_name, index));
+            index += 1;
+        }
+
+        candidate
     }
 
     fn save_message(
