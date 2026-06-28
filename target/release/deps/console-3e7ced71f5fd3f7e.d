@@ -1,0 +1,12 @@
+E:\sakurazaka46\colmsg-ui\target\release\deps\console-3e7ced71f5fd3f7e.d: C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\lib.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\common_term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\kb.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\utils.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\windows_term.rs
+
+E:\sakurazaka46\colmsg-ui\target\release\deps\libconsole-3e7ced71f5fd3f7e.rlib: C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\lib.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\common_term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\kb.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\utils.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\windows_term.rs
+
+E:\sakurazaka46\colmsg-ui\target\release\deps\libconsole-3e7ced71f5fd3f7e.rmeta: C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\lib.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\common_term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\kb.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\term.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\utils.rs C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\windows_term.rs
+
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\lib.rs:
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\common_term.rs:
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\kb.rs:
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\term.rs:
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\utils.rs:
+C:\Users\jx011\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\console-0.9.2\src\windows_term.rs:
