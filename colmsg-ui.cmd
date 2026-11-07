@@ -5,7 +5,8 @@ set "COLMSG_UI_ROOT=%~dp0"
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command "$path=$env:COLMSG_UI_CMD; $raw=[System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8); $marker='### POWERSHELL_UI_BELOW ###'; $index=$raw.LastIndexOf($marker); if ($index -lt 0) { throw 'Missing embedded UI script.' }; $script=$raw.Substring($index + $marker.Length).TrimStart([char]13, [char]10); Invoke-Expression $script"
 if errorlevel 1 pause
 exit /b %errorlevel%
-### POWERSHELL_UI_BELOW ###$ErrorActionPreference = "Stop"
+### POWERSHELL_UI_BELOW ###
+$ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -15,6 +16,8 @@ Add-Type -AssemblyName System.Drawing
 $script:process = $null
 $script:stopRequested = $false
 $script:runTimer = $null
+$script:stdoutTask = $null
+$script:stderrTask = $null
 if (-not [string]::IsNullOrWhiteSpace($env:COLMSG_UI_ROOT)) {
     $script:root = $env:COLMSG_UI_ROOT
 } else {
@@ -57,6 +60,19 @@ function Resolve-DefaultExePath {
     if (Test-Path $releaseExe) { return $releaseExe }
     if (Test-Path $localExe) { return $localExe }
     return $releaseExe
+}
+
+function Get-ExecutableBuildWarning {
+    param([string]$Executable)
+
+    $sourceDir = Join-Path $script:root "src"
+    if (-not (Test-Path -LiteralPath $sourceDir)) { return }
+    $source = Get-ChildItem -LiteralPath $sourceDir -Recurse -Filter "*.rs" |
+        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    $binary = Get-Item -LiteralPath $Executable
+    if ($source -and $source.LastWriteTimeUtc -gt $binary.LastWriteTimeUtc) {
+        return "WARNING: This executable is older than the Rust source changes. Rebuild with cargo build --release to use the pagination fix."
+    }
 }
 
 function Quote-Argument {
@@ -212,7 +228,10 @@ function Complete-RunFromProcess {
         Show-DownloadResult ("Download failed. Exit code: " + $exitCode + ". Check the log in this window.") ([System.Windows.Forms.MessageBoxIcon]::Error)
     }
 
+    if ($script:process -ne $null) { $script:process.Dispose() }
     $script:process = $null
+    $script:stdoutTask = $null
+    $script:stderrTask = $null
     $script:stopRequested = $false
     Set-RunningState $false
 }
@@ -220,12 +239,30 @@ function Complete-RunFromProcess {
 function Add-LogLine {
     param([string]$Text)
 
-    if ($logBox.InvokeRequired) {
-        $null = $logBox.BeginInvoke([Action]{
-            $logBox.AppendText($Text + [Environment]::NewLine)
-        })
-    } else {
-        $logBox.AppendText($Text + [Environment]::NewLine)
+    # All output is drained by the WinForms timer on the UI thread.
+    $logBox.AppendText($Text + [Environment]::NewLine)
+}
+
+function Receive-ProcessOutput {
+    # ReadLineAsync uses .NET tasks, without PowerShell callbacks on worker
+    # threads (which have no PowerShell runspace and can terminate the UI).
+    foreach ($stream in @("stdout", "stderr")) {
+        for ($line = 0; $line -lt 200; $line++) {
+            $task = Get-Variable -Name ($stream + "Task") -Scope Script -ValueOnly
+            if ($null -eq $task -or -not $task.IsCompleted) { break }
+            $text = $task.GetAwaiter().GetResult()
+            if ($null -eq $text) {
+                Set-Variable -Name ($stream + "Task") -Scope Script -Value $null
+                break
+            }
+            Add-LogLine $text
+            $reader = if ($stream -eq "stdout") {
+                $script:process.StandardOutput
+            } else {
+                $script:process.StandardError
+            }
+            Set-Variable -Name ($stream + "Task") -Scope Script -Value ($reader.ReadLineAsync())
+        }
     }
 }
 
@@ -720,6 +757,8 @@ $runButton.Add_Click({
 
         $logBox.Clear()
         Add-LogLine "Starting colmsg..."
+        $buildWarning = Get-ExecutableBuildWarning $exe
+        if ($buildWarning) { Add-LogLine $buildWarning }
         Add-LogLine ((Quote-Argument $exe) + " " + $displayArgumentText)
         Add-LogLine "Waiting for download output..."
         Add-LogLine "This window will stay open after the download finishes."
@@ -746,20 +785,10 @@ $runButton.Add_Click({
         $script:process.EnableRaisingEvents = $false
         $script:stopRequested = $false
 
-        $script:process.add_OutputDataReceived({
-            param($sender, $eventArgs)
-            if ($eventArgs.Data) { Add-LogLine $eventArgs.Data }
-        })
-
-        $script:process.add_ErrorDataReceived({
-            param($sender, $eventArgs)
-            if ($eventArgs.Data) { Add-LogLine $eventArgs.Data }
-        })
-
         Set-RunningState $true
         [void]$script:process.Start()
-        $script:process.BeginOutputReadLine()
-        $script:process.BeginErrorReadLine()
+        $script:stdoutTask = $script:process.StandardOutput.ReadLineAsync()
+        $script:stderrTask = $script:process.StandardError.ReadLineAsync()
 
         if ($script:runTimer -ne $null) {
             $script:runTimer.Stop()
@@ -772,12 +801,22 @@ $runButton.Add_Click({
                 if ($script:process -eq $null) {
                     return
                 }
-                if ($script:process.HasExited) {
+                Receive-ProcessOutput
+                if ($script:process.HasExited -and
+                    $null -eq $script:stdoutTask -and $null -eq $script:stderrTask) {
                     Complete-RunFromProcess
                 }
             } catch {
+                $script:runTimer.Stop()
+                $script:stdoutTask = $null
+                $script:stderrTask = $null
                 Show-UiError $_.Exception.ToString()
-                Complete-RunFromProcess
+                if ($script:process.HasExited) {
+                    Complete-RunFromProcess
+                } else {
+                    Set-Status "Output error. Crawl is still running; use Stop to cancel." $true
+                    $script:runTimer.Start()
+                }
             }
         })
         $script:runTimer.Start()

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::{errors::*, http::client::SHNClient};
+use serde::{Deserialize, Serialize};
 
 const PATH: &str = "/v2/groups";
 const PATH2: &str = "/timeline";
@@ -64,17 +64,42 @@ pub struct Timeline {
     pub letters: Vec<TimelineLetters>,
     pub messages: Vec<TimelineMessages>,
     pub queried_at: String,
+    #[serde(default)]
+    pub continuation: Option<String>,
 }
 
-pub fn request<C: SHNClient>(client: C, access_token: &String, id: &u32, fromdate: &String, count: &String) -> Result<Timeline> {
+pub fn request<C: SHNClient>(
+    client: C,
+    access_token: &String,
+    id: &u32,
+    fromdate: &String,
+    count: &String,
+) -> Result<Timeline> {
+    request_page(client, access_token, id, fromdate, count, None)
+}
+
+pub fn request_page<C: SHNClient>(
+    client: C,
+    access_token: &String,
+    id: &u32,
+    fromdate: &String,
+    count: &String,
+    continuation: Option<&str>,
+) -> Result<Timeline> {
     let path = format!("{}/{}{}", PATH, id, PATH2);
     let access_token = String::from(access_token);
-    let parameters = vec![
-        ("updated_from", fromdate.as_str()),
-        ("count", count),
-        ("order", ORDER),
-        ("clear_unread", "true")
-    ];
+    // The server's opaque cursor contains the page boundaries, order, and count.
+    // Do not combine it with a newly calculated timestamp cursor.
+    let parameters = if let Some(continuation) = continuation {
+        vec![("continuation", continuation), ("clear_unread", "true")]
+    } else {
+        vec![
+            ("updated_from", fromdate.as_str()),
+            ("count", count),
+            ("order", ORDER),
+            ("clear_unread", "true"),
+        ]
+    };
 
     client.get_request::<Timeline>(path.as_str(), &access_token, Some(parameters), true)
 }

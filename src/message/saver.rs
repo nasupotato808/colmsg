@@ -1,5 +1,5 @@
-use std::fs;
 use std::path::PathBuf;
+use std::{collections::HashSet, fs};
 
 use chrono::{Local, NaiveDateTime};
 use rayon::prelude::*;
@@ -163,6 +163,9 @@ impl<'b, C: SHNClient> Saver<'b, C> {
         id_dates = self.id_dates(&member_dir_buf);
 
         let mut count = http::timeline::DEFAULT_COUNT;
+        let mut continuation: Option<String> = None;
+        let mut seen_continuations = HashSet::new();
+        let mut uses_continuation = false;
 
         // 購読しているメンバーのメッセージを取得するAPIを複数回叩くためのループ
         loop {
@@ -170,16 +173,25 @@ impl<'b, C: SHNClient> Saver<'b, C> {
                 break;
             }
 
-            let timeline = http::timeline::request(
+            let timeline = http::timeline::request_page(
                 self.config.client.clone(),
                 &self.config.access_token,
                 &member_identifier.id,
                 &fromdate,
                 &count.to_string(),
+                continuation.as_deref(),
             )?;
 
             let message_length = timeline.messages.len();
-            if message_length == 0 {
+            println!(
+                "Fetched {} messages for {} (from {}, page size {}).",
+                message_length, member_identifier.name, fromdate, count
+            );
+            let next_continuation = timeline
+                .continuation
+                .as_deref()
+                .filter(|value| !value.is_empty());
+            if message_length == 0 && next_continuation.is_none() {
                 break;
             }
 
@@ -188,7 +200,12 @@ impl<'b, C: SHNClient> Saver<'b, C> {
             // updated_atの値を基準にメッセージを取得している
             // 取得したメッセージのupdated_atがすべて同じだと基準が判明しない
             // 最新のメッセージまで取得出来たか、異なるupdated_atの値が現れるまでメッセージ取得数を増やしてメッセージ取得を施行する
-            if !reached_to && message_length >= count && self.are_all_updated_at_same(&timeline) {
+            if !uses_continuation
+                && next_continuation.is_none()
+                && !reached_to
+                && message_length >= count
+                && self.are_all_updated_at_same(&timeline)
+            {
                 count += http::timeline::DEFAULT_COUNT;
                 continue;
             }
@@ -200,11 +217,41 @@ impl<'b, C: SHNClient> Saver<'b, C> {
             }
             id_dates = self.id_dates(&member_dir_buf);
 
-            // 最新のメッセージまで保存し終わったら終了する
-            if reached_to || message_length < http::timeline::DEFAULT_COUNT {
+            if reached_to {
                 break;
             };
-            fromdate = self.latest_timeline_date(&timeline)?;
+            // count includes letters/comments as well as messages. Even a page
+            // with no downloadable messages can point to another page.
+            if let Some(next) = next_continuation {
+                if !seen_continuations.insert(next.to_string()) {
+                    return Err(
+                        "Timeline repeated a continuation token; crawl is incomplete".into(),
+                    );
+                }
+                continuation = Some(next.to_string());
+                uses_continuation = true;
+                continue;
+            }
+            if uses_continuation {
+                break;
+            }
+            let next_fromdate = self.latest_timeline_date(&timeline)?;
+            let next_date = Self::parse_message_updated_at(&next_fromdate)?;
+            let current_date = Self::parse_message_updated_at(&fromdate)?;
+            if next_date < current_date {
+                return Err("Timeline pagination moved backwards; crawl is incomplete".into());
+            }
+            // updated_from is inclusive. A short page containing only the cursor
+            // timestamp confirms that there are no later messages. A short page
+            // with a newer timestamp still needs another request (servers may cap
+            // the page size below the requested count).
+            if next_date == current_date {
+                if message_length < count {
+                    break;
+                }
+                return Err("Timeline pagination did not advance; crawl is incomplete".into());
+            }
+            fromdate = next_fromdate;
 
             // 保存し終わったらメッセージ取得数をデフォルトに戻す
             count = http::timeline::DEFAULT_COUNT;
@@ -265,7 +312,8 @@ impl<'b, C: SHNClient> Saver<'b, C> {
     fn latest_timeline_date(&self, timeline: &Timeline) -> Result<String> {
         let message = timeline
             .messages
-            .last()
+            .iter()
+            .max_by(|a, b| a.updated_at.cmp(&b.updated_at))
             .ok_or_else(|| "timeline has no messages".to_string())?;
         Self::parse_message_updated_at(&message.updated_at)?;
         Ok(message.updated_at.clone())
@@ -410,7 +458,12 @@ impl<'b, C: SHNClient> Saver<'b, C> {
             })
             .flatten()
             .collect::<Vec<_>>();
-        result.sort_by(|a, b| a.date.cmp(&b.date).then(a.id.cmp(&b.id)).then(a.media.cmp(&b.media)));
+        result.sort_by(|a, b| {
+            a.date
+                .cmp(&b.date)
+                .then(a.id.cmp(&b.id))
+                .then(a.media.cmp(&b.media))
+        });
         result
     }
 
@@ -468,4 +521,271 @@ fn dir_entry_to_id_date(filename: &DirEntry) -> Option<IdDate> {
                 date: cap["date"].to_string(),
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{de::DeserializeOwned, Serialize};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Clone)]
+    struct MockClient {
+        messages: Rc<Vec<serde_json::Value>>,
+        calls: Rc<RefCell<Vec<String>>>,
+        page_limit: usize,
+    }
+
+    impl SHNClient for MockClient {
+        fn new() -> Self {
+            unreachable!()
+        }
+
+        fn post_request<RT: DeserializeOwned, JT: Serialize + ?Sized>(
+            &self,
+            _: &str,
+            _: &JT,
+            _: bool,
+        ) -> Result<RT> {
+            unreachable!()
+        }
+
+        fn get_request<RT: DeserializeOwned>(
+            &self,
+            path: &str,
+            _: &str,
+            parameters: Option<Vec<(&str, &str)>>,
+            _: bool,
+        ) -> Result<RT> {
+            let body = if path.ends_with("/past_messages") {
+                serde_json::json!({"messages": []})
+            } else {
+                assert!(path.ends_with("/timeline"));
+                let parameters = parameters.unwrap();
+                let from = parameters
+                    .iter()
+                    .find(|(k, _)| *k == "updated_from")
+                    .unwrap()
+                    .1;
+                let count = parameters
+                    .iter()
+                    .find(|(k, _)| *k == "count")
+                    .unwrap()
+                    .1
+                    .parse::<usize>()
+                    .unwrap();
+                let mut calls = self.calls.borrow_mut();
+                calls.push(from.to_string());
+                assert!(calls.len() < 30, "pagination did not terminate");
+                let messages: Vec<_> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m["updated_at"].as_str().unwrap() >= from)
+                    .take(count.min(self.page_limit))
+                    .collect();
+                serde_json::json!({"messages": messages, "comments": [], "letters": [],
+                    "queried_at": "2026-11-06T00:00:00Z"})
+            };
+            Ok(serde_json::from_value(body).unwrap())
+        }
+    }
+
+    fn crawl(
+        message_count: usize,
+        page_limit: usize,
+        shared_timestamp: bool,
+        to: Option<NaiveDateTime>,
+    ) -> (usize, Vec<String>) {
+        let start =
+            NaiveDateTime::parse_from_str("2026-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ").unwrap();
+        let messages = (0..message_count)
+            .map(|i| {
+                let seconds = if shared_timestamp { 0 } else { i as i64 };
+                let date = (start + chrono::Duration::seconds(seconds))
+                    .format("%Y-%m-%dT%H:%M:%SZ")
+                    .to_string();
+                serde_json::json!({"id": i + 1, "group_id": 1, "is_favorite": false,
+                "is_silent": false, "published_at": date, "updated_at": date,
+                "state": "published", "type": "text", "text": "test"})
+            })
+            .collect();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let directory = tempdir::TempDir::new("colmsg-pagination").unwrap();
+        let config = Config {
+            name: vec!["test".into()],
+            from: None,
+            to,
+            kind: vec![Kind::Text],
+            dir: directory.path().to_path_buf(),
+            access_token: "test".into(),
+            member_id: None,
+            message_group_id: Some(1),
+            client: MockClient {
+                messages: Rc::new(messages),
+                calls: calls.clone(),
+                page_limit,
+            },
+        };
+        Saver::new(&config).save().unwrap();
+        let saved = fs::read_dir(directory.path().join("test")).unwrap().count();
+        let requests = calls.borrow().clone();
+        (saved, requests)
+    }
+
+    #[test]
+    fn crawls_more_than_one_hundred_messages() {
+        let (saved, calls) = crawl(251, 100, false, None);
+        assert_eq!(saved, 251);
+        assert!(calls.len() >= 4);
+    }
+
+    #[test]
+    fn continues_after_server_returns_a_short_page() {
+        let (saved, calls) = crawl(251, 37, false, None);
+        assert_eq!(saved, 251);
+        assert!(calls.len() > 7);
+    }
+
+    #[test]
+    fn expands_pages_for_messages_sharing_a_timestamp() {
+        let (saved, _) = crawl(250, usize::MAX, true, None);
+        assert_eq!(saved, 250);
+    }
+
+    #[test]
+    fn stops_at_explicit_end_date() {
+        let to =
+            NaiveDateTime::parse_from_str("2026-01-01T00:02:00Z", "%Y-%m-%dT%H:%M:%SZ").unwrap();
+        let (saved, _) = crawl(251, 37, false, Some(to));
+        assert_eq!(saved, 121);
+    }
+
+    #[derive(Clone)]
+    struct CursorClient {
+        pages: Rc<RefCell<std::collections::VecDeque<serde_json::Value>>>,
+        calls: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl SHNClient for CursorClient {
+        fn new() -> Self {
+            unreachable!()
+        }
+        fn post_request<RT: DeserializeOwned, JT: Serialize + ?Sized>(
+            &self,
+            _: &str,
+            _: &JT,
+            _: bool,
+        ) -> Result<RT> {
+            unreachable!()
+        }
+
+        fn get_request<RT: DeserializeOwned>(
+            &self,
+            path: &str,
+            _: &str,
+            parameters: Option<Vec<(&str, &str)>>,
+            _: bool,
+        ) -> Result<RT> {
+            let body = if path.ends_with("/past_messages") {
+                serde_json::json!({"messages": []})
+            } else {
+                let parameters = parameters.unwrap();
+                let cursor = parameters.iter().find(|(key, _)| *key == "continuation");
+                if let Some((_, cursor)) = cursor {
+                    assert!(!parameters
+                        .iter()
+                        .any(|(key, _)| ["updated_from", "order", "count"].contains(key)));
+                    self.calls.borrow_mut().push(cursor.to_string());
+                } else {
+                    assert!(self.calls.borrow().is_empty(), "lost the server cursor");
+                    self.calls.borrow_mut().push("initial".into());
+                }
+                self.pages
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("requested beyond final cursor page")
+            };
+            Ok(serde_json::from_value(body).unwrap())
+        }
+    }
+
+    fn cursor_crawl(pages: Vec<serde_json::Value>) -> (Result<()>, usize, Vec<String>) {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let directory = tempdir::TempDir::new("colmsg-cursor").unwrap();
+        let config = Config {
+            name: vec!["test".into()],
+            from: None,
+            to: None,
+            kind: vec![Kind::Text],
+            dir: directory.path().to_path_buf(),
+            access_token: "test".into(),
+            member_id: None,
+            message_group_id: Some(1),
+            client: CursorClient {
+                pages: Rc::new(RefCell::new(pages.into())),
+                calls: calls.clone(),
+            },
+        };
+        let result = Saver::new(&config).save();
+        let saved = fs::read_dir(directory.path().join("test")).unwrap().count();
+        let requests = calls.borrow().clone();
+        (result, saved, requests)
+    }
+
+    fn cursor_page(
+        ids: std::ops::Range<u32>,
+        continuation: Option<&str>,
+        comments: usize,
+    ) -> serde_json::Value {
+        // Shared timestamps also ensure cursor paging takes precedence over the
+        // old strategy of increasing count to resolve timestamp ties.
+        let messages: Vec<_> = ids
+            .map(|id| {
+                serde_json::json!({
+                    "id": id, "group_id": 1, "is_favorite": false, "is_silent": false,
+                    "published_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+                    "state": "published", "type": "text", "text": "test"
+                })
+            })
+            .collect();
+        serde_json::json!({"messages": messages, "letters": [],
+            "comments": vec![serde_json::json!({}); comments],
+            "queried_at": "2026-11-06T00:00:00Z", "continuation": continuation})
+    }
+
+    #[test]
+    fn follows_continuation_through_mixed_and_message_empty_pages() {
+        let (result, saved, calls) = cursor_crawl(vec![
+            cursor_page(1..91, Some("opaque-next-1"), 10),
+            cursor_page(0..0, Some("opaque-next-2"), 100),
+            cursor_page(91..111, None, 0),
+        ]);
+        result.unwrap();
+        assert_eq!(saved, 110);
+        assert_eq!(calls, vec!["initial", "opaque-next-1", "opaque-next-2"]);
+    }
+
+    #[test]
+    fn cursor_handles_full_pages_with_identical_timestamps() {
+        let (result, saved, calls) = cursor_crawl(vec![
+            cursor_page(1..101, Some("next-full-page"), 0),
+            cursor_page(101..201, None, 0),
+        ]);
+        result.unwrap();
+        assert_eq!(saved, 200);
+        assert_eq!(calls, vec!["initial", "next-full-page"]);
+    }
+
+    #[test]
+    fn repeated_continuation_is_an_error_not_success_or_an_infinite_loop() {
+        let (result, _, calls) = cursor_crawl(vec![
+            cursor_page(1..2, Some("repeated"), 0),
+            cursor_page(2..3, Some("repeated"), 0),
+        ]);
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("repeated a continuation"));
+        assert_eq!(calls.len(), 2);
+    }
 }
